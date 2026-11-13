@@ -109,11 +109,7 @@ class WPP_ParsiDate {
           $out .= $this->week_day( $date['wday'] );
           break;
         case'z':
-          if ( $date['mon'] === 12 && $this->IsPerLeapYear( $date['year'] ) ) {
-            $out .= 30 + $date['mday'];
-          } else {
-            $out .= $this->j_days_in_month[ $date['mon'] ] + $date['mday'];
-          }
+          $out .= $this->j_days_sum_month[ $date['mon'] ] + $date['mday'] - 1;
           break;
         //week
         case'W':
@@ -357,9 +353,9 @@ class WPP_ParsiDate {
       );
     }
 
-    return date(
+    return gmdate(
       $format,
-      mktime(
+      gmmktime(
         $matches[3] ?? 0,
         $matches[4] ?? 0,
         $matches[5] ?? 0,

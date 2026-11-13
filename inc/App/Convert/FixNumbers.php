@@ -18,11 +18,11 @@ class FixNumbers {
     }
 
     if ( Settings::get( 'conv_page_title', false ) ) {
-      add_filter( 'wp_title', [ $this, 'changeNumbersToPersian' ], 1000 );
+      add_filter( 'wp_title', [ $this, 'fixNumbersToPersian' ], 1000 );
     }
 
     if ( Settings::get( 'conv_title', false ) ) {
-      add_filter( 'the_title', [ $this, 'changeNumbersToPersian' ], 0 );
+      add_filter( 'the_title', [ $this, 'fixNumbersToPersian' ], 0 );
     }
 
     if ( Settings::get( 'conv_contents', false ) ) {
@@ -60,6 +60,7 @@ class FixNumbers {
 
     $converted = NumberConverter::convertContent( $content );
 
+    // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Legacy public hook name, kept for backward compatibility.
     return apply_filters( 'wp_parsidate_fix_post_content_numbers', $converted, $content );
   }
 

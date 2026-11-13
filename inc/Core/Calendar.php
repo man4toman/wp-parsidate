@@ -7,6 +7,7 @@
 
 namespace WPParsidate\Core;
 
+use WPParsidate\Helper\Cache;
 use WPParsidate\Helper\Number;
 
 defined( 'ABSPATH' ) || exit;
@@ -51,27 +52,43 @@ class Calendar {
     }
 
     if ( $jy > 1500 ) {
-      list( $jy, $jm, $jd ) = $pd->gregorian_to_persian( $year, $monthnum, $day );
+      // A Gregorian archive: take the date parts from the query vars, or from ?m=YYYYMMDD.
+      $gy = (int) ( '' !== (string) $year ? $year : substr( $m, 0, 4 ) );
+      $gm = (int) ( '' !== (string) $monthnum ? $monthnum : substr( $m, 4, 2 ) );
+      $gd = (int) ( '' !== (string) $day ? $day : substr( $m, 6, 2 ) );
+
+      list( $jy, $jm, $jd ) = $pd->gregorian_to_persian( $gy, max( 1, $gm ), max( 1, $gd ) );
     }
 
+    // Cache group and key suffix, invalidated whenever a post changes.
+    $lastChanged = wp_cache_get_last_changed( 'posts' );
+
     if ( ! $posts ) {
-      $gotsome = $wpdb->get_var(
-        $wpdb->prepare(
-          "
-					SELECT 1 AS test
+      $cacheKey = 'gotsome_' . md5( $postType ) . ':' . $lastChanged;
+      $gotSome  = Cache::get( $cacheKey );
+
+      if ( false === $gotSome ) {
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Same query as core get_calendar(), there is no WordPress API for it. Cached per posts change.
+        $gotSome = (int) $wpdb->get_var(
+          $wpdb->prepare(
+            "SELECT 1 AS test
 					FROM $wpdb->posts
 					WHERE post_type = %s
 					  	AND post_status = 'publish'
-					LIMIT 1
-				", $postType )
-      );
+					LIMIT 1",
+            $postType )
+        );
 
-      if ( ! $gotsome ) {
+        Cache::set( $cacheKey, $gotSome, DAY_IN_SECONDS * 3 );
+      }
+
+      if ( ! $gotSome ) {
         return;
       }
     }
 
-    $week_begins  = (int) get_option( 'start_of_week' );
+    $week_begins = (int) get_option( 'start_of_week' );
+    // phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Public read-only query var, same as core get_calendar().
     $w            = (int) sanitize_text_field( wp_unslash( $_GET['w'] ?? '' ) );
     $is_gregorian = false;
 
@@ -79,12 +96,10 @@ class Calendar {
       $thisMonth = zeroise( (int) $jm, 2 );
       $thisYear  = '' . (int) $jy;
     } elseif ( ! empty( $w ) ) {
-      $thisYear  = '' . (int) substr( $m, 0, 4 );
-      $d         = ( ( $w - 1 ) * 7 ) + 6; //it seems MySQL's weeks disagree with PHP's
-      $thisMonth = $wpdb->get_var(
-        $wpdb->prepare( "SELECT DATE_FORMAT ( ( DATE_ADD( %s, INTERVAL %d DAY ) ), '%%m')", $thisYear . '0101', $d )
-      );
-      //$thisMonth = $wpdb->get_var( "SELECT DATE_FORMAT ( ( DATE_ADD( '{$thisYear}0101', INTERVAL $d DAY ) ), '%m')" );
+      $thisYear = '' . (int) substr( $m, 0, 4 );
+      $d        = ( ( $w - 1 ) * 7 ) + 6; //it seems MySQL's weeks disagree with PHP's
+      // Month of the day $d days after January 1st (was a MySQL DATE_ADD() query).
+      $thisMonth = gmdate( 'm', gmmktime( 0, 0, 0, 1, 1 + $d, (int) $thisYear ) );
     } elseif ( ! empty( $m ) ) {
       $thisYear = '' . (int) substr( $m, 0, 4 );
 
@@ -126,31 +141,45 @@ class Calendar {
     $end   = $pd->gregorian_date( 'Y-m-d 23:59:59',
       "$jnextyear-$jthismonth-" . $pd->j_days_in_month[ $jthismonth - 1 ] );
 
-    $previous = $wpdb->get_row(
-      $wpdb->prepare(
-        "SELECT MONTH(post_date) AS month,
-				  	YEAR(post_date) AS year
-                FROM $wpdb->posts
-                WHERE post_date < %s
-                	AND post_type = %s
-                    AND post_status = 'publish'
-                ORDER BY post_date DESC
-                LIMIT 1
-               ", $start, $postType )
-    );
+    $cacheKey = 'adjacent_' . md5( $start . '|' . $end . '|' . $postType ) . ':' . $lastChanged;
+    $adjacent = Cache::get( $cacheKey );
 
-    $next = $wpdb->get_row(
-      $wpdb->prepare(
-        "SELECT MONTH(post_date) AS month,
+    if ( false === $adjacent ) {
+      $adjacent = [];
+
+      // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Same query as core get_calendar(), there is no WordPress API for it. Cached per posts change.
+      $adjacent['previous'] = $wpdb->get_row(
+        $wpdb->prepare(
+          "SELECT MONTH(post_date) AS month,
 				  	YEAR(post_date) AS year
-                FROM $wpdb->posts
-                WHERE post_date >= %s
-                	AND post_type = %s
-                    AND post_status = 'publish'
-                ORDER BY post_date ASC
-                LIMIT 1
-                ", $end, $postType )
-    );
+                  FROM $wpdb->posts
+                  WHERE post_date < %s
+                  	AND post_type = %s
+                      AND post_status = 'publish'
+                  ORDER BY post_date DESC
+                  LIMIT 1",
+          $start, $postType )
+      );
+
+      // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Same query as core get_calendar(), there is no WordPress API for it. Cached per posts change.
+      $adjacent['next'] = $wpdb->get_row(
+        $wpdb->prepare(
+          "SELECT MONTH(post_date) AS month,
+				  	YEAR(post_date) AS year
+                  FROM $wpdb->posts
+                  WHERE post_date >= %s
+                  	AND post_type = %s
+                      AND post_status = 'publish'
+                  ORDER BY post_date ASC
+                  LIMIT 1",
+          $end, $postType )
+      );
+
+      Cache::set( $cacheKey, $adjacent, DAY_IN_SECONDS * 3 );
+    }
+
+    $previous = $adjacent['previous'] ?? null;
+    $next     = $adjacent['next'] ?? null;
 
     $calendar_output = '<table id="wp-calendar" class="widget_calendar ' . WP_PARSI_CLASS_PREFIX . 'calendar-widget-table ' . WP_PARSI_CLASS_PREFIX . 'calendar-widget-theme-' . esc_attr( $theme ) . '">' .
                        '<caption>' . esc_html( $monthsName[ (int) $jthismonth ] ) . ' ' .
@@ -209,24 +238,32 @@ class Calendar {
 
     //____________________________________________________________________________________________________________________________________
 
-    $dayswithposts = $wpdb->get_results(
-      $wpdb->prepare(
-        "SELECT DISTINCT DAYOFMONTH ( post_date ),
+    $cacheKey      = 'days_' . md5( $start . '|' . $end . '|' . $postType ) . ':' . $lastChanged;
+    $daysWithPosts = Cache::get( $cacheKey );
+
+    if ( false === $daysWithPosts ) {
+      // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Same query as core get_calendar(), there is no WordPress API for it. Cached per posts change.
+      $daysWithPosts = $wpdb->get_results(
+        $wpdb->prepare(
+          "SELECT DISTINCT DAYOFMONTH ( post_date ),
 			  	MONTH ( post_date ),
 			  	YEAR ( post_date )
-        	FROM $wpdb->posts
-       		WHERE post_date > %s
-       		    AND post_date < %s
-        		AND post_type = %s
-        		AND post_status = 'publish'
-        	", $start, $end, $postType ),
-      ARRAY_N
-    );
+          	FROM $wpdb->posts
+         		WHERE post_date > %s
+         		    AND post_date < %s
+          		AND post_type = %s
+          		AND post_status = 'publish'
+          	", $start, $end, $postType ),
+        ARRAY_N
+      );
 
-    $daywithpost = array();
-    if ( $dayswithposts ) {
-      foreach ( $dayswithposts as $daywith ) {
-        $daywithpost[] = $pd->persian_date( 'j', "$daywith[2]-$daywith[1]-$daywith[0]", 'eng' );
+      Cache::set( $cacheKey, $daysWithPosts, DAY_IN_SECONDS * 3 );
+    }
+
+    $dayWithPost = array();
+    if ( $daysWithPosts ) {
+      foreach ( $daysWithPosts as $dayWith ) {
+        $dayWithPost[] = $pd->persian_date( 'j', "$dayWith[2]-$dayWith[1]-$dayWith[0]", 'eng' );
       }
     }
 
@@ -241,9 +278,14 @@ class Calendar {
     }
 
     $ak_titles_for_day = array();
-    $ak_post_titles    = $wpdb->get_results(
-      $wpdb->prepare(
-        "SELECT ID,
+    $cacheKey          = 'titles_' . md5( $start . '|' . $end . '|' . $postType ) . ':' . $lastChanged;
+    $ak_post_titles    = Cache::get( $cacheKey );
+
+    if ( false === $ak_post_titles ) {
+      // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Same query as core get_calendar(), there is no WordPress API for it. Cached per posts change.
+      $ak_post_titles = $wpdb->get_results(
+        $wpdb->prepare(
+          "SELECT ID,
 				  	post_title,
 				  	DAYOFMONTH ( post_date ) AS dom,
 				  	MONTH ( post_date ) AS month,
@@ -252,13 +294,17 @@ class Calendar {
 				WHERE post_date >= %s
 				    AND post_date <= %s
 				    AND post_type = %s
-				    AND post_status = 'publish'
-				", $start, $end, $postType )
-    );
+				    AND post_status = 'publish'",
+          $start, $end, $postType )
+      );
+
+      Cache::set( $cacheKey, $ak_post_titles, DAY_IN_SECONDS * 3 );
+    }
 
     if ( $ak_post_titles ) {
       foreach ( $ak_post_titles as $ak_post_title ) {
         /** This filter is documented in wp-includes/post-template.php */
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WordPress core hook.
         $post_title         = apply_filters( 'the_title', $ak_post_title->post_title, $ak_post_title->ID );
         $ak_post_title->dom = $pd->persian_date( 'j',
           "$ak_post_title->year-$ak_post_title->month-$ak_post_title->dom", 'eng' );
@@ -287,8 +333,8 @@ class Calendar {
     $currentMonth = gmdate( 'm', time() + $tzOffset );
     $currentYear  = gmdate( 'Y', time() + $tzOffset );
 
-    for ( $day = 1; $day <= $daysInMonth; ++ $day ) {
-      list( $thisYear, $thisMonth, $thisDay ) = $pd->persian_to_gregorian( $jthisyear, $jthismonth, $day );
+    for ( $calendarDay = 1; $calendarDay <= $daysInMonth; ++ $calendarDay ) {
+      list( $thisYear, $thisMonth, $thisDay ) = $pd->persian_to_gregorian( $jthisyear, $jthismonth, $calendarDay );
 
       if ( isset( $newrow ) && $newrow ) {
         $calendar_output .= "\n\t</tr>\n\t<tr>\n\t\t";
@@ -302,28 +348,28 @@ class Calendar {
         $calendar_output .= '<td>';
       }
 
-      $p_day = Number::toPersian( $day );
+      $p_day = Number::toPersian( $calendarDay );
 
-      if ( in_array( $day, $daywithpost ) ) {
-        $dayLinkDate = $pd->gregorian_date( 'Y,m,d', "$jthisyear-$jthismonth-$day" );
+      if ( in_array( $calendarDay, $dayWithPost ) ) {
+        $dayLinkDate = $pd->gregorian_date( 'Y,m,d', "$jthisyear-$jthismonth-$calendarDay" );
         $dayLinkDate = explode( ',', $dayLinkDate );
         $url         = get_day_link( $dayLinkDate[0], $dayLinkDate[1], $dayLinkDate[2] );
         if ( 'post' !== $postType ) {
           $url = add_query_arg( 'post_type', $postType, $url );
         }
-        $calendar_output .= '<a href="' . esc_url( $url ) . '" title="' . esc_attr( $ak_titles_for_day[ $day ] ?? '' ) . '">' . esc_html( $p_day ) . '</a>';
+        $calendar_output .= '<a href="' . esc_url( $url ) . '" title="' . esc_attr( $ak_titles_for_day[ $calendarDay ] ?? '' ) . '">' . esc_html( $p_day ) . '</a>';
       } else {
         $calendar_output .= esc_html( $p_day );
       }
 
       $calendar_output .= '</td>';
 
-      if ( 6 == calendar_week_mod( $pd->gregorian_date( 'w', "$jthisyear-$jthismonth-$day" ) - $week_begins ) ) {
+      if ( 6 == calendar_week_mod( $pd->gregorian_date( 'w', "$jthisyear-$jthismonth-$calendarDay" ) - $week_begins ) ) {
         $newrow = true;
       }
     }
 
-    $pad = 6 - calendar_week_mod( $pd->gregorian_date( 'w', "$jthisyear-$jthismonth-" . ( $day - 1 ), 'eng' ) - $week_begins );
+    $pad = 6 - calendar_week_mod( $pd->gregorian_date( 'w', "$jthisyear-$jthismonth-" . ( $calendarDay - 1 ), 'eng' ) - $week_begins );
 
     if ( $pad != 0 && $pad != 7 ) {
       $calendar_output .= "\n\t\t" . '<td class="pad" colspan="' . (int) $pad . '">&nbsp;</td>';

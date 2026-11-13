@@ -1,10 +1,10 @@
-=== پارسی دیت – Parsi Date ===
+=== Parsi Date | بسته فارسی ساز وردپرس و ووکامرس پارسی دیت ===
 Contributors: lord_viper, man4toman, parselearn, yazdaniwp, saeedfard, iehsanir, wordpress-parsi
 Donate link: https://wp-parsi.com/support/
 Tags: Shamsi, Persian, Jalali, WooCommerce, ووکامرس
 Requires at least: 5.3
 Tested up to: 7.1
-Stable tag: 6.4
+Stable tag: 6.5.2
 Requires PHP: 7.4
 License: GPLv3
 
@@ -66,7 +66,24 @@ ParsiDate is a powerful plugin developed by Persian contributors to enhance the 
 6. Addon tab
 7. WooCommerce settings
 
+== Upgrade Notice ==
+
+= 6.6.0 =
+If you use a Parsi Date bank gateway (Parsian, Pasargad, Mellat, Melli), install ParsiGate: the gateways will be removed from Parsi Date in version 7.0. / اگر از درگاه بانکی پارسی‌دیت استفاده می‌کنید، پارسی‌گیت را نصب کنید؛ درگاه‌ها در نسخه‌ی ۷.۰ حذف می‌شوند.
+
 == Changelog ==
+
+= 6.6.0 =
+* Deprecated: The built-in bank gateways (Parsian, Pasargad, Mellat, Melli) move to [ParsiGate](https://wordpress.org/plugins/parsigate/) and will be removed in Parsi Date 7.0. Sites that use them get a notice with one-click installation of ParsiGate, which imports their gateway settings.
+* Fix: WooCommerce order date became wrong (e.g. 784-04-28) after updating the order on sites with a persistent object cache
+
+= 6.5.2 =
+* Add: [PLoad](https://wordpress.org/plugins/pload/) demo addon
+* Fix: Check type of variables
+
+= 6.5.1 =
+* Fix: Visibility issue of Jalali date picker
+* Fix: PHP fatal error in dashboard widget
 
 = 6.5 =
 * Security: Stored XSS in the calendar block `theme` attribute (CVE-2026-97642). Block attributes are now sanitized and the calendar output escaped.
@@ -84,8 +101,10 @@ ParsiDate is a powerful plugin developed by Persian contributors to enhance the 
 * Fix: `_load_textdomain_just_in_time` notice on WordPress 6.7+. [#PR](https://github.com/wordpress-parsi/wp-parsidate/pull/353)
 * Fix: PHP warnings in the ACF date/time pickers and the "access_expires" array key. [#issue](https://github.com/wordpress-parsi/wp-parsidate/issues/349)
 * Fix: Undefined WooCommerce function errors when WooCommerce is not loaded on a page.
+* Fix: Ensure admin notices can be dismissed reliably when JavaScript is unavailable or fails.
 * Perf: Build static date lookup tables once per request for faster dual-date rendering.
-* Update: Dependencies, including enshrined/svg-sanitize 1.0.0.
+* Perf: Persistently cache archive, calendar, and permalink lookups to reduce repeated database queries.
+* Update: Dependencies, including enshrined/svg-sanitize 1.1.1
 
 = 6.4 =
 * Add: Elementor addon. Jalali datepicker for Elementor form date fields and Jalali dates in "Form Submissions" screen.

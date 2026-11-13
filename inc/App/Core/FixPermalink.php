@@ -11,6 +11,7 @@ namespace WPParsidate\App\Core;
 defined( 'ABSPATH' ) || exit;
 
 use WPParsidate\Core\{Posts, WPP_ParsiDate};
+use WPParsidate\Helper\Cache;
 use WPParsidate\Settings\Settings;
 
 class FixPermalink {
@@ -60,6 +61,7 @@ class FixPermalink {
      * @since 6.3
      *
      */
+    // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- Legacy public hook name, kept for backward compatibility.
     return apply_filters( 'wp_parsidate_day_link', $dayLink, $jYear, $jMonth, $jDay );
   }
 
@@ -108,17 +110,17 @@ class FixPermalink {
     $pd  = WPP_ParsiDate::getInstance();
 
     if ( isset( $permalink['name'] ) ) {
-      $var = $wpdb->get_var(
-        $wpdb->prepare(
-          "
-				SELECT post_date FROM $wpdb->posts
-				WHERE post_name = %s
-				  AND post_type != 'attachment'
-				ORDER BY ID
-				",
-          $permalink['name'],
-        ),
-      );
+      $cacheKey = 'post_date_by_name_' . md5( $permalink['name'] ) . ':' . wp_cache_get_last_changed( 'posts' );
+      $var      = Cache::get( $cacheKey, false );
+
+      if ( false === $var ) {
+        // phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery -- Lookup by slug across all post types, no WordPress API returns it. Cached per posts change.
+        $var = (string) $wpdb->get_var(
+          $wpdb->prepare( "SELECT post_date FROM $wpdb->posts WHERE post_name = %s AND post_type != 'attachment' ORDER BY ID", $permalink['name'] )
+        );
+
+        Cache::set( $cacheKey, $var );
+      }
 
       if ( empty( $var ) ) {
         return;
@@ -142,15 +144,7 @@ class FixPermalink {
 
     } elseif ( isset( $permalink['post_id'] ) ) {
       $out = true;
-      $var = $wpdb->get_var(
-        $wpdb->prepare(
-          "
-					SELECT post_date FROM $wpdb->posts
-					WHERE ID = %d
-				",
-          absint( $permalink['post_id'] )
-        ),
-      );
+      $var = get_post_field( 'post_date', absint( $permalink['post_id'] ), 'raw' );
 
     } elseif ( ! empty( $year ) && ! empty( $monthnum ) && ! empty( $day ) ) {
       $out = true;
@@ -305,6 +299,7 @@ class FixPermalink {
                * @since 3.5.0
                *
                */
+              // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WordPress core hook.
               $category_object = apply_filters( 'post_link_category', $cats[0], $cats, $post );
               $category_object = get_term( $category_object, 'category' );
               $category        = $category_object->slug;

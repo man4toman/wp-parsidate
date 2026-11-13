@@ -189,6 +189,7 @@ class DashboardWidget {
          * @since 2.3.0
          *
          */
+        // phpcs:ignore WordPress.NamingConventions.PrefixAllGlobals.NonPrefixedHooknameFound -- WordPress core hook.
         'title'        => apply_filters( 'dashboard_primary_title', esc_html__( 'ParsiDate', 'wp-parsidate' ) ),
         'items'        => 5,
         'show_summary' => 0,
@@ -305,25 +306,17 @@ class DashboardWidget {
   private function getMockedSponsors(): array {
     $sponsors    = array();
     $allSponsors = $this->getRemoteSponsors();
+
     if ( empty( $allSponsors ) ) {
       $allSponsors = $this->getDataSponsors();
     }
-    /*$all_sponsors = array(
-      array(
-        'image_url' => WP_PARSI_URL . 'assets/images/sponsors/files-ir.jpg',
-        'image_alt' => 'Files.ir',
-        'link'      => 'https://files.ir/?utm_source=wp-persian&utm_medium=WordPress&utm_campaign=Sponsored-Banner',
-        'end_date'  => '2026-11-21',
-      ),
-      array(
-        'image_url' => WP_PARSI_URL . 'assets/images/sponsors/hostiran-1.png',
-        'image_alt' => 'HostIran',
-        'link'      => 'https://hostiran.net/host/?utm_source=parsidate&utm_medium=banner&utm_campaign=awareness',
-        'end_date'  => '2026-11-21',
-      )
-    );*/
-    $today = date( 'Y-m-d' );
+
+    $today = gmdate( 'Y-m-d' );
     foreach ( $allSponsors as $sponsor ) {
+      if ( ! $this->isValidSponsor( $sponsor ) ) {
+        continue;
+      }
+
       if ( strtotime( $sponsor['end_date'] ) > strtotime( $today ) ) {
         $sponsors[] = $sponsor;
       }
@@ -340,26 +333,50 @@ class DashboardWidget {
 
     $sponsors = [];
     $urls     = [
-      'https://raw.githubusercontent.com/wordpress-parsi/wp-parsidate/refs/heads/master/inc/Data/sponsors.json'
+      // Raw file from the repository (not rate-limited like api.github.com).
+      'https://raw.githubusercontent.com/wordpress-parsi/wp-parsidate/master/inc/Data/sponsors.json'
     ];
 
     foreach ( $urls as $url ) {
       $response = wp_remote_get( $url, [ 'timeout' => 6 ] );
 
-      if ( ! is_wp_error( $response ) ) {
-        $data = JSON::decode( wp_remote_retrieve_body( $response ), true );
-        $data = is_array( $data ) ? $data : [];
+      if ( is_wp_error( $response ) || 200 !== (int) wp_remote_retrieve_response_code( $response ) ) {
+        continue;
+      }
 
-        if ( ! empty( $data ) ) {
-          $sponsors = $data;
-          break;
-        }
+      $data = JSON::decode( wp_remote_retrieve_body( $response ), true );
+
+      // Only accept a list of sponsor objects, never an error object like {"message": "..."}.
+      if ( ! is_array( $data ) || array_values( $data ) !== $data ) {
+        continue;
+      }
+
+      $data = array_values( array_filter( $data, [ $this, 'isValidSponsor' ] ) );
+
+      if ( ! empty( $data ) ) {
+        $sponsors = $data;
+        break;
       }
     }
 
-    Cache::set( 'remote_dashboard_sponsors', $sponsors, DAY_IN_SECONDS );
+    // Cache failures for a shorter time so sites recover sooner.
+    Cache::set( 'remote_dashboard_sponsors', $sponsors, empty( $sponsors ) ? HOUR_IN_SECONDS : DAY_IN_SECONDS );
 
     return $sponsors;
+  }
+
+  /**
+   * Check that a sponsor item has the expected structure.
+   *
+   * @param mixed $sponsor
+   *
+   * @return bool
+   * @since 6.5.1
+   */
+  private function isValidSponsor( $sponsor ): bool {
+    return is_array( $sponsor )
+           && ! empty( $sponsor['end_date'] ) && is_string( $sponsor['end_date'] )
+           && ( ! empty( $sponsor['image'] ) && is_string( $sponsor['image'] ) || ! empty( $sponsor['image_url'] ) && is_string( $sponsor['image_url'] ) );
   }
 
   private function getDataSponsors(): array {
